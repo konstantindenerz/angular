@@ -8,7 +8,7 @@
 
 import {Location} from '@angular/common';
 import {inject, Injectable, NgZone, Type, ɵConsole as Console, ɵInitialRenderPendingTasks as InitialRenderPendingTasks, ɵRuntimeError as RuntimeError} from '@angular/core';
-import {Observable, of, SubscriptionLike} from 'rxjs';
+import {Observable, SubscriptionLike} from 'rxjs';
 
 import {createSegmentGroupFromRoute, createUrlTreeFromSegmentGroup} from './create_url_tree';
 import {INPUT_BINDER} from './directives/router_outlet';
@@ -26,7 +26,6 @@ import {UrlHandlingStrategy} from './url_handling_strategy';
 import {containsTree, IsActiveMatchOptions, isUrlTree, UrlSegmentGroup, UrlSerializer, UrlTree} from './url_tree';
 import {standardizeConfig, validateConfig} from './utils/config';
 import {afterNextNavigation} from './utils/navigations';
-
 
 
 function defaultErrorHandler(error: any): any {
@@ -147,6 +146,7 @@ export class Router {
    * page.
    */
   private currentPageId: number = 0;
+
   /**
    * The ɵrouterPageId of whatever page is currently active in the browser history. This is
    * important for computing the target page id for new navigations because we need to ensure each
@@ -158,6 +158,7 @@ export class Router {
     }
     return (this.location.getState() as RestoredState | null)?.ɵrouterPageId;
   }
+
   private console = inject(Console);
   private isNgZoneEnabled: boolean = false;
 
@@ -171,6 +172,7 @@ export class Router {
     // the change.
     return this.navigationTransitions.events;
   }
+
   /**
    * The current state of routing in this NgModule.
    */
@@ -310,6 +312,7 @@ export class Router {
   private readonly navigationTransitions = inject(NavigationTransitions);
   private readonly urlSerializer = inject(UrlSerializer);
   private readonly location = inject(Location);
+  private readonly ngZone = inject(NgZone);
 
   /**
    * Indicates whether the the application has opted in to binding Router data to component inputs.
@@ -735,21 +738,32 @@ export class Router {
       // initial navigations and redirects within the same task.
       Promise.resolve().then(() => this.pendingTasks.remove(taskId));
     });
-
-    this.navigationTransitions.handleNavigationRequest({
-      source,
-      restoredState,
-      currentUrlTree: this.currentUrlTree,
-      currentRawUrl: this.currentUrlTree,
-      rawUrl,
-      extras,
-      resolve,
-      reject,
-      promise,
-      currentSnapshot: this.routerState.snapshot,
-      currentRouterState: this.routerState
-    });
-
+    const fn = () => {
+      this.navigationTransitions.handleNavigationRequest({
+        source,
+        restoredState,
+        currentUrlTree: this.currentUrlTree,
+        currentRawUrl: this.currentUrlTree,
+        rawUrl,
+        extras,
+        resolve,
+        reject,
+        promise,
+        currentSnapshot: this.routerState.snapshot,
+        currentRouterState: this.routerState
+      });
+    };
+    if ((document as any).startViewTransition !== undefined) {
+      this.ngZone.runOutsideAngular(() => {
+        (document as any).startViewTransition(() => {
+          this.ngZone.run(() => {
+            fn();
+          });
+        });
+      });
+    } else {
+      fn();
+    }
     // Make sure that the error is propagated even though `processNavigations` catch
     // handler does not rethrow
     return promise.catch((e: any) => {
